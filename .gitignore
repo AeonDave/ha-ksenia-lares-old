@@ -127,3 +127,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+.idea/
+
+custom_components/ha_ksenia_lares/.vscode/

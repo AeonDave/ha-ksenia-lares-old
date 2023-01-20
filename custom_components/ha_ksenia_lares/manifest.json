@@ -1,0 +1,18 @@
+{
+  "domain": "ha_ksenia_lares",
+  "name": "Ksenia Lares Old",
+  "version": "1.0.0",
+  "integration_type": "hub",
+  "config_flow": true,
+  "documentation": "https://github.com/AeonDave/HA-KseniaLares-old",
+  "issue_tracker": "https://github.com/AeonDave/HA-KseniaLares-old/issues",
+  "dependencies": [],
+  "codeowners": [
+    "@AeonDave"
+  ],
+  "requirements": [
+    "lxml",
+    "getmac"
+  ],
+  "iot_class": "local_polling"
+}
