@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import time
 from abc import ABC
 from datetime import timedelta
 
@@ -82,6 +81,10 @@ class LaresOutput(CoordinatorEntity, LightEntity, ABC):
     @property
     def available(self) -> bool:
         return self._coordinator.data[int(self._idx)]["remoteControl"] == OUTPUT_CONTROL
+
+    @property
+    def icon(self) -> str:
+        return 'mdi:globe-light'
 
     async def async_turn_on(self) -> None:
         _LOGGER.debug('Output %s on sent', self._idx)
