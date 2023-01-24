@@ -89,19 +89,13 @@ class LaresOutput(CoordinatorEntity, LightEntity, ABC):
     async def async_turn_on(self) -> None:
         _LOGGER.debug('Output %s on sent', self._idx)
         await self._client.command_output(self._pin, self._idx, OUTPUT_ON_VALUE)
-        i = 0
-        while not self.is_on and i < 5:
-            i += 1
-            await asyncio.sleep(200 / 1000)
-            await self.coordinator.async_request_refresh()
+        await asyncio.sleep(500 / 1000)
+        await self.coordinator.async_request_refresh()
         _LOGGER.debug('Output %s on', self._idx)
 
     async def async_turn_off(self) -> None:
         _LOGGER.debug('Output %s off sent', self._idx)
         await self._client.command_output(self._pin, self._idx, OUTPUT_OFF_VALUE)
-        i = 0
-        while self.is_on and i < 5:
-            i += 1
-            await asyncio.sleep(200 / 1000)
-            await self.coordinator.async_request_refresh()
+        await asyncio.sleep(500 / 1000)
+        await self.coordinator.async_request_refresh()
         _LOGGER.debug('Output %s on', self._idx)
