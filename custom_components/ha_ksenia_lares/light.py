@@ -19,7 +19,7 @@ from .const import OUTPUT_ON, OUTPUT_CONTROL, OUTPUT_ON_VALUE, OUTPUT_OFF_VALUE
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 10
+DEFAULT_TIMEOUT = 5
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_HOST): cv.string,
@@ -31,15 +31,32 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 SCAN_INTERVAL = timedelta(seconds=30)
 
 
-async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
+async def async_setup_entry(
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        async_add_entities: AddEntitiesCallback
+) -> None:
     client = LaresBase(config_entry.data)
     device_info = await client.device_info()
+    if device_info is None:
+        _LOGGER.error("Impossible to get device info")
+        return
     basis_info = await client.basis_info()
+    if basis_info is None or "PINToUse" not in basis_info:
+        _LOGGER.error("Impossible to get basis info")
+        return
     descriptions = await client.outputs_descriptions(device_info)
+    if not descriptions:
+        _LOGGER.error("Impossible to get outputs descriptions")
+        return
 
-    async def async_update_data():
-        async with async_timeout.timeout(DEFAULT_TIMEOUT):
-            return await client.outputs_status(device_info)
+    async def async_update_data() -> list[dict]:
+        try:
+            async with async_timeout.timeout(DEFAULT_TIMEOUT):
+                return await client.outputs_status(device_info)
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Timeout during connection to Lares")
+            return []
 
     coordinator = DataUpdateCoordinator(
         hass,
@@ -50,18 +67,32 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
     )
     await coordinator.async_refresh()
 
-    async_add_entities(
-        LaresOutput(client, coordinator, basis_info['PINToUse'], descriptions[output], str(output))
+    entities = [
+        LaresOutput(
+            client=client,
+            coordinator=coordinator,
+            pin=basis_info["PINToUse"],
+            name=descriptions[output],
+            idx=str(output)
+        )
         for output in descriptions
-    )
+    ]
+    async_add_entities(entities)
 
 
 class LaresOutput(CoordinatorEntity, LightEntity, ABC):
 
-    def __init__(self, client: LaresBase, coordinator: DataUpdateCoordinator, pin: str, name: str, idx: str):
+    def __init__(
+            self,
+            client: LaresBase,
+            coordinator: DataUpdateCoordinator,
+            pin: str,
+            name: str,
+            idx: str
+    ) -> None:
         super().__init__(coordinator, context=idx)
         self._client = client
-        self._coordinator = coordinator
+        self._coord = coordinator
         self._pin = pin
         self._name = name
         self._idx = idx
@@ -76,11 +107,19 @@ class LaresOutput(CoordinatorEntity, LightEntity, ABC):
 
     @property
     def is_on(self) -> bool:
-        return self._coordinator.data[int(self._idx)]["status"] == OUTPUT_ON
+        try:
+            return self._coord.data[int(self._idx)]["status"] == OUTPUT_ON
+        except (KeyError, IndexError, TypeError) as err:
+            _LOGGER.error("Error getting output status: %s", err)
+            return False
 
     @property
     def available(self) -> bool:
-        return self._coordinator.data[int(self._idx)]["remoteControl"] == OUTPUT_CONTROL
+        try:
+            return self._coord.data[int(self._idx)]["remoteControl"] == OUTPUT_CONTROL
+        except (KeyError, IndexError, TypeError) as err:
+            _LOGGER.error("Error getting output status: %s", err)
+            return False
 
     @property
     def icon(self) -> str:
@@ -89,13 +128,13 @@ class LaresOutput(CoordinatorEntity, LightEntity, ABC):
     async def async_turn_on(self) -> None:
         _LOGGER.debug('Output %s on sent', self._idx)
         await self._client.command_output(self._pin, self._idx, OUTPUT_ON_VALUE)
-        await asyncio.sleep(500 / 1000)
+        await asyncio.sleep(1)
         await self.coordinator.async_request_refresh()
         _LOGGER.debug('Output %s on', self._idx)
 
     async def async_turn_off(self) -> None:
         _LOGGER.debug('Output %s off sent', self._idx)
         await self._client.command_output(self._pin, self._idx, OUTPUT_OFF_VALUE)
-        await asyncio.sleep(500 / 1000)
+        await asyncio.sleep(1)
         await self.coordinator.async_request_refresh()
         _LOGGER.debug('Output %s on', self._idx)
