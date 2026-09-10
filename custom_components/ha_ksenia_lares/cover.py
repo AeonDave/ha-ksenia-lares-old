@@ -1,8 +1,4 @@
-"""Shutter covers built from TAPP SU / TAPP GIU pulse output pairs.
-
-Open/close follow this house's physical wiring (and the old Lovelace
-Apri/Chiudi cards), not the panel SU/GIU labels. See outputs.pair_shutters.
-"""
+"""Shutter covers built from TAPP SU / TAPP GIU pulse output pairs."""
 from __future__ import annotations
 
 import asyncio

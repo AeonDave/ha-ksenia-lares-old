@@ -1,7 +1,7 @@
 {
   "domain": "ha_ksenia_lares",
   "name": "Ksenia Lares Old",
-  "version": "1.1.1",
+  "version": "1.1.0",
   "integration_type": "hub",
   "config_flow": true,
   "documentation": "https://github.com/AeonDave/HA-KseniaLares-old",
