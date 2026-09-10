@@ -1,25 +1,28 @@
 import asyncio
 import logging
-from abc import ABC
 from datetime import timedelta
 
-import async_timeout
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant.components.binary_sensor import PLATFORM_SCHEMA
-from homeassistant.components.light import LightEntity
+from homeassistant.components.light import ColorMode, LightEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+    UpdateFailed,
+)
 
 from .base import LaresBase
 from .const import OUTPUT_ON, OUTPUT_CONTROL, OUTPUT_ON_VALUE, OUTPUT_OFF_VALUE
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 5
+DEFAULT_TIMEOUT = 10
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_HOST): cv.string,
@@ -39,33 +42,33 @@ async def async_setup_entry(
     client = LaresBase(config_entry.data)
     device_info = await client.device_info()
     if device_info is None:
-        _LOGGER.error("Impossible to get device info")
-        return
+        raise ConfigEntryNotReady("Impossible to get Lares device info")
     basis_info = await client.basis_info()
     if basis_info is None or "PINToUse" not in basis_info:
-        _LOGGER.error("Impossible to get basis info")
-        return
+        raise ConfigEntryNotReady("Impossible to get Lares basis info")
     descriptions = await client.outputs_descriptions(device_info)
     if not descriptions:
-        _LOGGER.error("Impossible to get outputs descriptions")
-        return
+        raise ConfigEntryNotReady("Impossible to get Lares outputs descriptions")
 
     async def async_update_data() -> list[dict]:
         try:
-            async with async_timeout.timeout(DEFAULT_TIMEOUT):
-                return await client.outputs_status(device_info)
-        except asyncio.TimeoutError:
-            _LOGGER.warning("Timeout during connection to Lares")
-            return []
+            async with asyncio.timeout(DEFAULT_TIMEOUT):
+                data = await client.outputs_status(device_info)
+        except TimeoutError as err:
+            raise UpdateFailed("Timeout during connection to Lares") from err
+        if not data:
+            raise UpdateFailed("No output status received from Lares")
+        return data
 
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
+        config_entry=config_entry,
         name="lares_outputs",
         update_method=async_update_data,
         update_interval=SCAN_INTERVAL,
     )
-    await coordinator.async_refresh()
+    await coordinator.async_config_entry_first_refresh()
 
     entities = [
         LaresOutput(
@@ -77,10 +80,13 @@ async def async_setup_entry(
         )
         for output in descriptions
     ]
+    _LOGGER.info("Setting up %s Lares output entities", len(entities))
     async_add_entities(entities)
 
 
-class LaresOutput(CoordinatorEntity, LightEntity, ABC):
+class LaresOutput(CoordinatorEntity, LightEntity):
+    _attr_supported_color_modes = {ColorMode.ONOFF}
+    _attr_color_mode = ColorMode.ONOFF
 
     def __init__(
             self,
@@ -110,15 +116,17 @@ class LaresOutput(CoordinatorEntity, LightEntity, ABC):
         try:
             return self._coord.data[int(self._idx)]["status"] == OUTPUT_ON
         except (KeyError, IndexError, TypeError) as err:
-            _LOGGER.error("Error getting output status: %s", err)
+            _LOGGER.error("Error getting output status for %s: %s", self._idx, err)
             return False
 
     @property
     def available(self) -> bool:
+        if not self._coord.last_update_success or not self._coord.data:
+            return False
         try:
             return self._coord.data[int(self._idx)]["remoteControl"] == OUTPUT_CONTROL
         except (KeyError, IndexError, TypeError) as err:
-            _LOGGER.error("Error getting output status: %s", err)
+            _LOGGER.error("Error getting output availability for %s: %s", self._idx, err)
             return False
 
     @property
@@ -137,4 +145,4 @@ class LaresOutput(CoordinatorEntity, LightEntity, ABC):
         await self._client.command_output(self._pin, self._idx, OUTPUT_OFF_VALUE)
         await asyncio.sleep(1)
         await self.coordinator.async_request_refresh()
-        _LOGGER.debug('Output %s on', self._idx)
+        _LOGGER.debug('Output %s off', self._idx)

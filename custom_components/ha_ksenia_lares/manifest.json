@@ -1,7 +1,7 @@
 {
   "domain": "ha_ksenia_lares",
   "name": "Ksenia Lares Old",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "integration_type": "hub",
   "config_flow": true,
   "documentation": "https://github.com/AeonDave/HA-KseniaLares-old",
@@ -11,8 +11,7 @@
     "@AeonDave"
   ],
   "requirements": [
-    "lxml",
-    "netifaces"
+    "lxml"
   ],
   "iot_class": "local_polling"
 }

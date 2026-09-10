@@ -1,5 +1,4 @@
 """Ksenia Lares < v4.0 Component."""
-import asyncio
 import logging
 
 import voluptuous as vol
@@ -19,10 +18,7 @@ async def async_setup_entry(hass: core.HomeAssistant, entry: config_entries.Conf
     unsub_options_update_listener = entry.add_update_listener(options_update_listener)
     hass_data["unsub_options_update_listener"] = unsub_options_update_listener
     hass.data[DOMAIN][entry.entry_id] = hass_data
-    for component in PLATFORMS:
-        hass.async_create_task(
-            hass.config_entries.async_forward_entry_setup(entry, component)
-        )
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
@@ -31,15 +27,11 @@ async def options_update_listener(hass: core.HomeAssistant, config_entry: config
 
 
 async def async_unload_entry(hass: core.HomeAssistant, entry: config_entries.ConfigEntry) -> bool:
-    unload_ok = all(
-        await asyncio.gather(
-            *(hass.config_entries.async_forward_entry_unload(entry, component)
-              for component in PLATFORMS)
-        )
-    )
-    hass.data[DOMAIN][entry.entry_id]["unsub_options_update_listener"]()
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        stored = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if stored and stored.get("unsub_options_update_listener"):
+            stored["unsub_options_update_listener"]()
     return unload_ok
 
 
