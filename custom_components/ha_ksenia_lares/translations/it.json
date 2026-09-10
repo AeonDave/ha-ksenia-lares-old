@@ -2,20 +2,20 @@
     "title": "Ksenia Lares",
     "config": {
         "abort": {
-            "already_configured": "Device is already configured"
+            "already_configured": "Dispositivo già configurato"
         },
         "error": {
-            "cannot_connect": "Failed to connect",
-            "invalid_auth": "Invalid authentication",
-            "unknown": "Unexpected error"
+            "cannot_connect": "Connessione non riuscita",
+            "invalid_auth": "Autenticazione non valida",
+            "unknown": "Errore imprevisto"
         },
         "step": {
             "user": {
                 "data": {
                     "host": "Host",
-                    "port": "Port",
+                    "port": "Porta",
                     "password": "Password",
-                    "username": "Username"
+                    "username": "Utente"
                 }
             }
         }

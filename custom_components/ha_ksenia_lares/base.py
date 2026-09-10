@@ -1,12 +1,14 @@
-import asyncio
+from __future__ import annotations
+
 import logging
-from typing import Optional
+from typing import Any
 
 import aiohttp
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, format_mac
-from lxml import etree
+from xml.etree import ElementTree
 
 from .const import *
+from .outputs import OutputStatus, parse_outputs_description, parse_outputs_status
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -14,174 +16,156 @@ _HTTP_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
 class LaresBase:
+    """HTTP client for the Ksenia Lares < v4 XML web server."""
 
-    def __init__(self, data) -> None:
+    def __init__(self, data: dict[str, Any], session: aiohttp.ClientSession | None = None) -> None:
         self._ip: str = data["host"]
         self._port: str = str(data["port"])
-        self._schema: str = "http://"
-        self._host: str = f"{self._schema}{self._ip}:{self._port}"
-        self._auth: aiohttp.BasicAuth = aiohttp.BasicAuth(data["username"], data["password"])
+        self._schema = "http://"
+        self._host = f"{self._schema}{self._ip}:{self._port}"
+        self._auth = aiohttp.BasicAuth(data["username"], data["password"])
+        self._session = session
 
-    async def general_info(self) -> Optional[dict[str, str]]:
-        response = await self.get(GENERAL_INFO)
-        if response is None:
+    async def general_info(self) -> dict[str, str] | None:
+        root = await self.get(GENERAL_INFO)
+        if root is None:
             return None
-
         try:
-            name = response.xpath(XPATH_GENERAL_INFO_NAME)[0].text.strip()
-            info = {
+            name = _text(root, "productName")
+            return {
                 "mac": "",
                 "id": f"{self._ip}:{self._port}",
                 "name": name,
-                "info": response.xpath(XPATH_GENERAL_INFO_INFO)[0].text.strip(),
-                "version": response.xpath(XPATH_GENERAL_INFO_VERSION)[0].text.strip(),
-                "revision": response.xpath(XPATH_GENERAL_INFO_REVISION)[0].text.strip(),
-                "build": response.xpath(XPATH_GENERAL_INFO_BUILD)[0].text.strip(),
+                "info": _text(root, "info1"),
+                "version": _text(root, "productHighRevision"),
+                "revision": _text(root, "productLowRevision"),
+                "build": _text(root, "productBuildRevision"),
             }
-        except (IndexError, AttributeError) as err:
+        except (LookupError, AttributeError) as err:
             _LOGGER.error("Error parsing general info: %s", err)
             return None
 
-        return info
-
-    async def basis_info(self) -> Optional[dict[str, str]]:
-        response = await self.get(BASIS_INFO)
-        if response is None:
+    async def basis_info(self) -> dict[str, str] | None:
+        root = await self.get(BASIS_INFO)
+        if root is None:
             return None
-
         try:
-            info = {
-                "askPin": response.xpath(XPATH_BASIS_INFO_ASKPIN)[0].text,
-                "PINToUse": response.xpath(XPATH_BASIS_INFO_PINTOUSE)[0].text,
-                "PINTimeout": response.xpath(XPATH_BASIS_INFO_PINTIMEOUT)[0].text,
-                "startFromMap": response.xpath(XPATH_BASIS_INFO_STARTFROMMAP)[0].text,
+            return {
+                "askPin": _text(root, "askPIN"),
+                "PINToUse": _text(root, "PINToUse"),
+                "PINTimeout": _text(root, "PINTimeout"),
+                "startFromMap": _text(root, "startFromMap"),
             }
-        except (IndexError, AttributeError) as err:
+        except (LookupError, AttributeError) as err:
             _LOGGER.error("Error parsing basis info: %s", err)
             return None
 
-        return info
-
-    async def device_info(self) -> Optional[dict[str, str]]:
-        device_info = await self.general_info()
-        if device_info is None:
+    async def device_info(self) -> dict[str, Any] | None:
+        general = await self.general_info()
+        if general is None:
             return None
-
-        info = {
-            "identifiers": {(DOMAIN, device_info["id"])},
-            "name": device_info["name"],
-            "manufacturer": device_info["info"],
-            "model": device_info["name"],
-            "sw_version": f'{device_info["version"]}.{device_info["revision"]}.{device_info["build"]}',
-            "lares_version": device_info["name"].split()[-1],
+        info: dict[str, Any] = {
+            "identifiers": {(DOMAIN, general["id"])},
+            "name": general["name"],
+            "manufacturer": general["info"] or MANUFACTURER,
+            "model": general["name"],
+            "sw_version": f'{general["version"]}.{general["revision"]}.{general["build"]}',
+            "lares_version": general["name"].split()[-1],
         }
-        if device_info["mac"]:
-            info["connections"] = {(CONNECTION_NETWORK_MAC, format_mac(device_info["mac"]))}
-
+        if general["mac"]:
+            info["connections"] = {(CONNECTION_NETWORK_MAC, format_mac(general["mac"]))}
         return info
 
-    async def _get_versioned_xml(self, prefix: str, device_info: dict[str, str]):
+    async def _get_versioned_bytes(self, prefix: str, device_info: dict[str, Any]) -> bytes | None:
         version = device_info.get("lares_version") or ""
         if version:
-            response = await self.get(f"{prefix}{version}.xml")
-            if response is not None:
-                return response
+            payload = await self.get_bytes(f"{prefix}{version}.xml")
+            if payload is not None:
+                return payload
             _LOGGER.warning(
                 "Versioned XML %s%s.xml unavailable, trying unversioned path",
                 prefix,
                 version,
             )
-        return await self.get(f"{prefix}.xml")
+        return await self.get_bytes(f"{prefix}.xml")
 
-    async def outputs_descriptions(self, device_info: dict[str, str]) -> Optional[dict[int, str]]:
-        response = await self._get_versioned_xml(OUTPUTS_DESCRIPTION, device_info)
-        if response is None:
+    async def outputs_descriptions(self, device_info: dict[str, Any]) -> dict[int, str] | None:
+        xml = await self._get_versioned_bytes(OUTPUTS_DESCRIPTION, device_info)
+        if xml is None:
             return None
-
-        outputs = response.xpath(XPATH_OUTPUTS_DESCRIPTION)
-        if not outputs:
+        try:
+            descriptions = parse_outputs_description(xml)
+        except ElementTree.ParseError as err:
+            _LOGGER.error("Invalid outputs description XML: %s", err)
+            return None
+        if not descriptions:
             _LOGGER.error("No outputs found in description XML (unexpected document)")
             return None
+        return descriptions
 
-        outputs_dict: dict[int, str] = {}
-        for i, output in enumerate(outputs):
-            if output.text:
-                outputs_dict[i] = output.text
-        return outputs_dict
-
-    async def zone_descriptions(self, device_info: dict[str, str]) -> Optional[list[str]]:
-        response = await self._get_versioned_xml(ZONES_DESCRIPTION, device_info)
-        if response is None:
+    async def outputs_status(self, device_info: dict[str, Any]) -> list[OutputStatus] | None:
+        xml = await self._get_versioned_bytes(OUTPUTS_STATUS, device_info)
+        if xml is None:
             return None
-
-        zones = response.xpath(XPATH_ZONES_DESCRIPTION)
-        return [zone.text for zone in zones if zone.text]
-
-    async def outputs_status(self, device_info: dict[str, str]) -> Optional[list[dict[str, str]]]:
-        response = await self._get_versioned_xml(OUTPUTS_STATUS, device_info)
-        if response is None:
+        try:
+            statuses = parse_outputs_status(xml)
+        except ElementTree.ParseError as err:
+            _LOGGER.error("Invalid outputs status XML: %s", err)
             return None
-
-        outputs = response.xpath(XPATH_OUTPUTS_STATUS)
-        if not outputs:
+        if not statuses:
             _LOGGER.error("No outputs found in status XML (unexpected document)")
             return None
+        return statuses
 
-        status_list: list[dict[str, str]] = []
-        for output in outputs:
-            try:
-                status_list.append({
-                    "status": output.find("status").text,
-                    "type": output.find("type").text,
-                    "value": output.find("value").text,
-                    "noPIN": output.find("noPIN").text,
-                    "remoteControl": output.find("remoteControl").text,
-                })
-            except AttributeError as err:
-                _LOGGER.error("Error parsing outputs_status: %s", err)
-        return status_list
-
-    async def zones_status(self, device_info: dict[str, str]) -> Optional[list[dict[str, str]]]:
-        response = await self._get_versioned_xml(ZONES_STATUS, device_info)
-        if response is None:
-            return None
-
-        zones = response.xpath(XPATH_ZONES_STATUS)
-        status_list: list[dict[str, str]] = []
-        for zone in zones:
-            try:
-                status_list.append({
-                    "status": zone.find("status").text,
-                    "bypass": zone.find("bypass").text,
-                    "alarm": zone.find("alarm").text,
-                })
-            except AttributeError as err:
-                _LOGGER.error("Error parsing zones_status: %s", err)
-        return status_list
-
-    async def command_output(self, pin: str, idx: str, value: str) -> Optional[list[str]]:
-        url_command = f"{GET_COMMAND}?cmd=setOutput&pin={pin}&outputId={idx}&outputValue={value}"
-        response = await self.get(url_command)
+    async def command_output(self, pin: str, idx: str, value: str) -> bool:
+        path = f"{GET_COMMAND}?cmd=setOutput&pin={pin}&outputId={idx}&outputValue={value}"
+        response = await self.get(path)
         if response is None:
             _LOGGER.error("Output command failed for outputId=%s", idx)
-            return None
-        return []
+            return False
+        return True
 
-    async def get(self, path) -> Optional[etree.Element]:
+    async def get(self, path: str) -> ElementTree.Element | None:
+        xml = await self.get_bytes(path)
+        if xml is None:
+            return None
+        try:
+            return ElementTree.fromstring(xml)
+        except ElementTree.ParseError as xml_err:
+            _LOGGER.warning("Host %s path %s returned invalid XML: %s", self._host, path.split("?", 1)[0], xml_err)
+            return None
+
+    async def get_bytes(self, path: str) -> bytes | None:
         url = f"{self._host}/xml/{path}"
         safe_path = path.split("?", 1)[0]
         try:
-            async with aiohttp.ClientSession(auth=self._auth, timeout=_HTTP_TIMEOUT) as session:
-                async with session.get(url=url) as response:
-                    response.raise_for_status()
-                    xml = await response.read()
-                    return etree.fromstring(xml)
+            if self._session is None:
+                async with aiohttp.ClientSession(auth=self._auth, timeout=_HTTP_TIMEOUT) as session:
+                    return await self._fetch(session, url, safe_path)
+            return await self._fetch(self._session, url, safe_path)
         except aiohttp.ClientResponseError as cre:
             _LOGGER.warning("Host %s path %s responded with HTTP %s", self._host, safe_path, cre.status)
-        except (aiohttp.ClientError, aiohttp.ClientConnectorError, asyncio.TimeoutError) as conn_err:
+        except (aiohttp.ClientError, TimeoutError) as conn_err:
             _LOGGER.warning("Host %s path %s connection error: %s", self._host, safe_path, conn_err)
-        except etree.XMLSyntaxError as xml_err:
+        except ElementTree.ParseError as xml_err:
             _LOGGER.warning("Host %s path %s returned invalid XML: %s", self._host, safe_path, xml_err)
         except Exception as ex:  # pylint: disable=broad-except
             _LOGGER.warning("Host %s path %s: unexpected error: %s", self._host, safe_path, ex)
         return None
+
+    async def _fetch(
+        self, session: aiohttp.ClientSession, url: str, safe_path: str
+    ) -> bytes:
+        async with session.get(url=url, auth=self._auth, timeout=_HTTP_TIMEOUT) as response:
+            response.raise_for_status()
+            xml = await response.read()
+            if b"FileNotFound" in xml[:800]:
+                raise ElementTree.ParseError(f"Lares FileNotFound for {safe_path}")
+            return xml
+
+
+def _text(root: ElementTree.Element, tag: str) -> str:
+    value = root.findtext(tag)
+    if value is None:
+        raise LookupError(tag)
+    return value.strip()
