@@ -23,16 +23,36 @@ class OutputStatus:
     remote_control: str
 
 
+# HA Open pulses TAPP SU only for these rooms. Everywhere else this house is
+# wired inverted vs the panel labels (confirmed by the old Lovelace Apri/Chiudi
+# cards: Apri used GIU, Chiudi used SU; CAMERA was the opposite).
+_ROOMS_OPEN_WITH_PANEL_SU = frozenset({"camera"})
+
+
 @dataclass(frozen=True)
 class ShutterPair:
     name: str
-    up_id: int
-    down_id: int
+    su_id: int
+    giu_id: int
+
+    @property
+    def up_id(self) -> int:
+        """Output pulsed for HA Open — physical raise, not the TAPP SU label."""
+        return self.su_id if _opens_with_panel_su(self.name) else self.giu_id
+
+    @property
+    def down_id(self) -> int:
+        """Output pulsed for HA Close — physical lower, not the TAPP GIU label."""
+        return self.giu_id if _opens_with_panel_su(self.name) else self.su_id
 
     @property
     def unique_id(self) -> str:
-        lo, hi = sorted((self.up_id, self.down_id))
+        lo, hi = sorted((self.su_id, self.giu_id))
         return f"cover-{lo}-{hi}"
+
+
+def _opens_with_panel_su(room: str) -> bool:
+    return room.casefold() in _ROOMS_OPEN_WITH_PANEL_SU
 
 
 def parse_outputs_description(xml: bytes) -> dict[int, str]:
@@ -62,7 +82,11 @@ def parse_outputs_status(xml: bytes) -> list[OutputStatus]:
 
 
 def pair_shutters(descriptions: dict[int, str]) -> list[ShutterPair]:
-    """Pair TAPP SU / TAPP GIU outputs that share the same room name."""
+    """Pair TAPP SU / TAPP GIU outputs that share the same room name.
+
+    Panel labels are kept on su_id/giu_id. up_id/down_id are the channels
+    HA Open/Close must pulse for this install's physical direction.
+    """
     ups: dict[str, int] = {}
     downs: dict[str, int] = {}
     for index, raw_name in descriptions.items():
@@ -77,7 +101,7 @@ def pair_shutters(descriptions: dict[int, str]) -> list[ShutterPair]:
 
     pairs: list[ShutterPair] = []
     for room in sorted(set(ups) & set(downs)):
-        pairs.append(ShutterPair(name=room, up_id=ups[room], down_id=downs[room]))
+        pairs.append(ShutterPair(name=room, su_id=ups[room], giu_id=downs[room]))
     return pairs
 
 

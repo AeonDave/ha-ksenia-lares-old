@@ -32,7 +32,14 @@ async def async_get_config_entry_diagnostics(
         "outputs_named": len(runtime.descriptions),
         "outputs_polled": len(runtime.coordinator.data or []),
         "shutter_covers": [
-            {"name": pair.name, "unique_id": pair.unique_id, "up": pair.up_id, "down": pair.down_id}
+            {
+                "name": pair.name,
+                "unique_id": pair.unique_id,
+                "up": pair.up_id,
+                "down": pair.down_id,
+                "su": pair.su_id,
+                "giu": pair.giu_id,
+            }
             for pair in pairs
         ],
     }

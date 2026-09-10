@@ -5,7 +5,7 @@ Custom integration for **Ksenia Lares < v4** panels (this house: `lares 128IP`) 
 ## What it does
 
 - **Lights** (`light.*`) — every named digital output, including shutter pulse channels.
-- **Covers** (`cover.*`) — paired `TAPP SU` / `TAPP GIU` outputs as shutters (open / close / stop). Position is unknown; the panel does not report travel.
+- **Covers** (`cover.*`) — paired `TAPP SU` / `TAPP GIU` outputs as shutters (open / close / stop). Position is unknown; the panel does not report travel. On this install the motors are wired inverted vs the panel labels: **Open pulses GIU, Close pulses SU**, except **Camera** (Open=SU, Close=GIU), matching the previous Lovelace Apri/Chiudi cards.
 - Alarm zones / partitions are **not** implemented (not installed on this system).
 
 Existing `light.tapp_su_*` / `light.tapp_giu_*` entities are kept so automations do not break. Prefer the new `cover.*` entities in the UI.

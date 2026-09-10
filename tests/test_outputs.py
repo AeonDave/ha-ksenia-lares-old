@@ -70,12 +70,28 @@ def test_pair_shutters_by_room_name_not_adjacent_ids():
     descriptions = parse_outputs_description(DESCRIPTION_XML)
     pairs = {pair.name: pair for pair in pair_shutters(descriptions)}
     assert set(pairs) == {"INGRESSO", "SALA", "CAMERA", "P.FIN CUCINA"}
-    assert pairs["INGRESSO"].up_id == 5
-    assert pairs["INGRESSO"].down_id == 6
-    assert pairs["CAMERA"].up_id == 10
-    assert pairs["CAMERA"].down_id == 9
+    assert pairs["INGRESSO"].su_id == 5
+    assert pairs["INGRESSO"].giu_id == 6
+    assert pairs["CAMERA"].su_id == 10
+    assert pairs["CAMERA"].giu_id == 9
     assert pairs["CAMERA"].unique_id == "cover-9-10"
     assert pairs["INGRESSO"].unique_id == "cover-5-6"
+
+
+def test_open_close_follow_house_wiring_not_panel_labels():
+    """Old Lovelace Apri/Chiudi is the physical source of truth.
+
+    Default: Open pulses TAPP GIU, Close pulses TAPP SU.
+    CAMERA is the opposite. CAMERETTA stays on the default mapping.
+    """
+    descriptions = parse_outputs_description(DESCRIPTION_XML)
+    pairs = {pair.name: pair for pair in pair_shutters(descriptions)}
+    ingresso = pairs["INGRESSO"]
+    assert ingresso.up_id == ingresso.giu_id == 6
+    assert ingresso.down_id == ingresso.su_id == 5
+    camera = pairs["CAMERA"]
+    assert camera.up_id == camera.su_id == 10
+    assert camera.down_id == camera.giu_id == 9
 
 
 def test_unpaired_shutter_is_ignored():
@@ -104,7 +120,11 @@ def test_live_panel_shutter_names_pair_seven_covers():
     }
     pairs = {pair.name: pair for pair in pair_shutters(descriptions)}
     assert len(pairs) == 7
+    assert pairs["INGRESSO"].up_id == 21
+    assert pairs["INGRESSO"].down_id == 20
     assert pairs["CAMERA"].up_id == 38
     assert pairs["CAMERA"].down_id == 37
+    assert pairs["CAMERETTA"].up_id == 29
+    assert pairs["CAMERETTA"].down_id == 28
     assert pairs["CAMERA"].unique_id == "cover-37-38"
     assert pairs["INGRESSO"].unique_id == "cover-20-21"
